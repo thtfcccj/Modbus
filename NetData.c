@@ -1,31 +1,24 @@
-/******************************************************************
-//						网络相关的数据处理函数	
-//	
-****************************************************************/
+/*******************************************************************************
+
+						        网络相关的数据编解码及校验函数集实现		
+
+*******************************************************************************/
 
 #include  "NetData.h" 
+#include  <string.h>
 
-//--------------------------得到LRC（纵向冗长检测）函数------------------
-//返回得到的LRC数据
-unsigned char GetLRC(unsigned char *pBuf,  //数据帧
-                     unsigned short Len)    //数据帧长度
-{
-  unsigned char LRC = 0;
-  unsigned char *pEndBuf = pBuf + Len;
-  for(; pBuf < pEndBuf; pBuf++){
-    LRC += *pBuf;
-  }
-  return 0 - LRC;  //取反码
-}
-
+/*******************************************************************************
+						               数据编码相关
+下述函数输入流可等于输出流
+*******************************************************************************/
 
 //-------------------------------ASCII字符转换为数据函数------------------
 //返回转换后的数据长度
 unsigned short AscToData(unsigned char *pDest, //转移后的目的地
-                         unsigned char *pSorce,//数据源
-                         unsigned short Len)   //数据长度
+                           const unsigned char *pSorce,//数据源
+                           unsigned short Len)   //数据长度
 {
-  unsigned char *pEndSorce = pSorce + Len;
+  const unsigned char *pEndSorce = pSorce + Len;
   //由低到高解码避免数据缓与目的地在同一缓冲区时出错
   for(; pSorce < pEndSorce; pDest++){
     unsigned char Data;
@@ -44,14 +37,23 @@ unsigned short AscToData(unsigned char *pDest, //转移后的目的地
   return Len >> 1;
 }
 
-//-------------------------------数据转换为ASCII字符函数---------------------
+//-----------------------ASCII字符转换为数据函数2-------------------------------
+//此为AscToData()变种，返回数据流结束位置
+unsigned char *pAscToData(unsigned char *pDist, 
+                          const char *pSorce,
+                          unsigned short Len)
+{
+  return pDist + AscToData(pDist, (unsigned char *)pSorce, Len);  
+}
+ 
+//-------------------------------数据转换为ASCII字符函数------------------------
 //返回转换后的数据长度
-unsigned short DataToASC(unsigned char *pDest, //转移后的目的地
-                         unsigned char *pSorce,//数据源
-                         unsigned short Len)   //数据长度
+unsigned short DataToAsc(unsigned char *pDest, //转移后的目的地
+                           const unsigned char *pSorce,//数据源
+                           unsigned short Len)   //数据长度
 {
   unsigned char *pCurDest = pDest + (Len << 1) - 1;////对齐数据
-  unsigned char *pCurSorce = pSorce + Len - 1;
+  const unsigned char *pCurSorce = pSorce + Len - 1;
   //由高到低解码避免数据缓与目的地在同一缓冲区时出错
   for(; pCurSorce >= pSorce; pCurSorce--){
     unsigned char Data = *pCurSorce;
@@ -69,8 +71,74 @@ unsigned short DataToASC(unsigned char *pDest, //转移后的目的地
   return Len << 1;
 }
 
-//CRC高位查找表
-static const __flash unsigned char  CRC_LUT_H[256] =
+//--------------------数据转换为ASCII字符函数2--------------------------------
+//此为DataToAsc()变种，返回字符串结束位置
+char *pDataToAsc(char *pDist, 
+                 const unsigned char *pSorce, 
+                 unsigned short Len)
+{
+  return pDist + DataToAsc((unsigned char *)pDist, pSorce, Len);
+}
+
+//----------------------------ASC数字转换为Bcd数字函数--------------------------
+//从最高位开始，若长度若为奇数，则首位Bcd码填充0,
+//如：字符串"130"转换后数据流为：0x01,0x30
+//调用此函数需确保长度范围内为asc数字, 否则将不是BCD值，返回Bcd结束位置
+unsigned char *pAscNumToBcd(const char *pStr, 
+                            unsigned char Len,
+                            unsigned char *pBcd)
+{
+  //首个奇数位单独填充
+  if(Len & 0x01){
+    *pBcd++ = *pStr++ - '0'; //高位自动为0
+    Len--;
+  }
+  //一次填充两
+  for(; Len > 0; Len-= 2){
+    unsigned char Bcd = *pStr++ - '0';
+    *pBcd++ = (Bcd << 4) + (*pStr++ - '0'); //高位在前，低位在后
+  }
+  return pBcd;
+}
+
+//----------------------------Bcd数字转换为ASC数字函数--------------------------
+//如：0x01,0x30转换为字符串后"0130"
+//调用此函数需确保长度范围内为BCD码, 否则字符串为异常值，返回字符结束位置
+char *pBcdNumToAsc(const unsigned char *pBcd,
+                   unsigned char Len,                
+                   char *pStr)
+{
+  //由低到高解码避免数据缓与目的地在同一缓冲区时出错
+  pStr += Len * 2;
+  *pStr-- = '\0';   //先强制填充结束字符
+  char *pEndStr = pStr;//结束位置
+  pBcd += (Len - 1);
+  for(; Len > 0; Len--){
+    unsigned char Bcd = *pBcd--;
+    *pStr-- = '0' + (Bcd & 0x0f);//低位
+    *pStr-- = '0' + (Bcd >> 4);  //高位
+  }
+  return pEndStr;
+}
+
+/*******************************************************************************
+						                      校验相关		
+*******************************************************************************/
+//--------------------------得到LRC（纵向冗长检测）函数-------------------------
+//可供MODBUS ASC协用， 返回得到的LRC数据
+unsigned char GetLRC(const unsigned char *pBuf,  //数据帧
+                      unsigned short Len)
+{
+  unsigned char LRC = 0;
+  const unsigned char *pEndBuf = pBuf + Len;
+  for(; pBuf < pEndBuf; pBuf++){
+    LRC += *pBuf;
+  }
+  return 0 - LRC;  //取反码
+}
+
+//CRC16高位查找表
+static const __flash unsigned char  _Crc16LutH[256] =
 {
 	0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0,
 	0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41,
@@ -99,8 +167,8 @@ static const __flash unsigned char  CRC_LUT_H[256] =
 	0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0,
 	0x80, 0x41, 0x00, 0xC1, 0x81, 0x40
 };
-//CRC低位查找表
-static const __flash unsigned char  CRC_LUT_L[256] =
+//CRC16低位查找表
+static const __flash unsigned char  _Crc16LutL[256] =
 {
 	0x00, 0xC0, 0xC1, 0x01, 0xC3, 0x03, 0x02, 0xC2, 0xC6, 0x06,
 	0x07, 0xC7, 0x05, 0xC5, 0xC4, 0x04, 0xCC, 0x0C, 0x0D, 0xCD,
@@ -130,19 +198,66 @@ static const __flash unsigned char  CRC_LUT_L[256] =
 	0x43, 0x83, 0x41, 0x81, 0x80, 0x40
 };
 
-//-----------------------得到CRC16（循环冗长检测）函数-------------------
-//返回得到的CRC16数据
-unsigned short GetCRC16(unsigned char *pBuf,  //数据帧
-                        unsigned short Len)   //数据帧长度
+//-----------------------得到CRC16（循环冗长检测）函数--------------------------
+//可供MODBUS RTU协用， 返回得到的CRC16数据
+unsigned short GetCRC16(const unsigned char *pBuf,  //数据帧
+                         unsigned short Len)
 {
   unsigned char CRCH = 0xff;
   unsigned char CRCL = 0xff;    
-  unsigned char *pEndBuf = pBuf + Len;
+  const unsigned char *pEndBuf = pBuf + Len;
   for(; pBuf < pEndBuf; pBuf++){
     unsigned char Index = CRCH ^ *pBuf;
-    CRCH = CRCL ^ CRC_LUT_H[Index];
-    CRCL = CRC_LUT_L[Index];	
+    CRCH = CRCL ^ _Crc16LutH[Index];
+    CRCL = _Crc16LutL[Index];	
   }
   return (unsigned short)(CRCH << 8) | (unsigned short)CRCL;
 }
+
+//CRC6低位查找表,多项时为0x131时表
+static const __flash unsigned char  _Crc8Lut_131[] ={ 
+  0, 94, 188, 226, 97, 63, 221, 131, 194, 156, 126, 32, 163, 253, 31, 65,  
+  157, 195, 33, 127, 252, 162, 64, 30, 95, 1, 227, 189, 62, 96, 130, 220,  
+  35, 125, 159, 193, 66, 28, 254, 160, 225, 191, 93, 3, 128, 222, 60, 98,  
+  190, 224, 2, 92, 223, 129, 99, 61, 124, 34, 192, 158, 29, 67, 161, 255,  
+  70, 24, 250, 164, 39, 121, 155, 197, 132, 218, 56, 102, 229, 187, 89, 7,  
+  219, 133, 103, 57, 186, 228, 6, 88, 25, 71, 165, 251, 120, 38, 196, 154,  
+  101, 59, 217, 135, 4, 90, 184, 230, 167, 249, 27, 69, 198, 152, 122, 36,  
+  248, 166, 68, 26, 153, 199, 37, 123, 58, 100, 134, 216, 91, 5, 231, 185,  
+  140, 210, 48, 110, 237, 179, 81, 15, 78, 16, 242, 172, 47, 113, 147, 205,  
+  17, 79, 173, 243, 112, 46, 204, 146, 211, 141, 111, 49, 178, 236, 14, 80,  
+  175, 241, 19, 77, 206, 144, 114, 44, 109, 51, 209, 143, 12, 82, 176, 238,  
+  50, 108, 142, 208, 83, 13, 239, 177, 240, 174, 76, 18, 145, 207, 45, 115,  
+  202, 148, 118, 40, 171, 245, 23, 73, 8, 86, 180, 234, 105, 55, 213, 139,  
+  87, 9, 235, 181, 54, 104, 138, 212, 149, 203, 41, 119, 244, 170, 72, 22,  
+  233, 183, 85, 11, 136, 214, 52, 106, 43, 117, 151, 201, 74, 20, 246, 168,  
+  116, 42, 200, 150, 21, 75, 169, 247, 182, 232, 10, 84, 215, 137, 107, 53  
+};
+
+//------------------得到CRC8（循环冗长检测）函数--带查找表----------------------
+//可供各种CRC8校验方式使用，返回得到的CRC8数据反码值
+//使用查表法，因多项式系数不同，可分别带入不同的表(NULL为默认0x131表)
+unsigned short GetCRC8_Tbl(const unsigned char *pBuf,  //数据帧
+                           unsigned short Len,         //数据帧长度
+                           const unsigned char *pTbl) //查找表 
+{
+  if(Len == 0) return 0;  
+  
+  if(pTbl == NULL) pTbl = _Crc8Lut_131;
+  unsigned char Crc = 0xff;
+  while(Len--){
+    Crc = pTbl[Crc ^ *pBuf];
+    pBuf++;
+  } 
+  return (Crc ^ 0xff);
+}
+
+//-----------------------得到CRC8-多项式为0x131函数--------------------------
+//此函数多项式系数为：x8+x5+x4+1              0x31（0x131）
+unsigned short GetCRC8_131(const unsigned char *pBuf,  //数据帧
+                            unsigned short Len)         //数据帧长度
+{
+  return GetCRC8_Tbl(pBuf, Len, NULL);
+}
+
 

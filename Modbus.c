@@ -277,7 +277,7 @@ signed char Modbus_SendStart(struct _Modbus *pModbus,
     Len += 1; //包含地址了
     *(pBuf + Len) = GetLRC(pBuf,Len);   //得到LRC数据校验码,含地址
     Len += 1;//包含LRC校验码了
-    Len = DataToASC(pBuf,pBuf,Len); //转换为ASCII,留开始字符与地址位置
+    Len = DataToAsc(pBuf,pBuf,Len); //转换为ASCII,留开始字符与地址位置
     //准备校验码与生成开始结束标志
     pBuf += Len;      //到达结束位置了
     *pBuf++ = 0x0d;
